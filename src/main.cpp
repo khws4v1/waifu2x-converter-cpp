@@ -18,8 +18,7 @@
 #include "tclap/CmdLine.h"
 
 #include "modelHandler.hpp"
-
-using namespace cv;
+#include "convertRoutine.hpp"
 
 int main(int argc, char** argv) {
 
@@ -75,6 +74,9 @@ int main(int argc, char** argv) {
 	cv::Mat image = cv::imread(cmdInputFile.getValue(), cv::IMREAD_COLOR);
 	image.convertTo(image, CV_32F, 1.0 / 255.0);
 
+	// set number of jobs for processing models
+	w2xc::modelUtility::getInstance().setNumberOfJobs(cmdNumberOfJobs.getValue());
+
 	// ===== Noise Reduction Phase =====
 	if (cmdMode.getValue() == "noise" || cmdMode.getValue() == "noise_scale") {
 		std::string modelFileName(cmdModelPath.getValue());
@@ -85,44 +87,17 @@ int main(int argc, char** argv) {
 		if (!w2xc::modelUtility::generateModelFromJSON(modelFileName, models))
 			std::exit(-1);
 
-		// set njob
-		for (auto&& model : models) {
-			model->setNumberOfJobs(cmdNumberOfJobs.getValue());
-		}
-
 		cv::Mat imageYUV;
-		cv::cvtColor(image, imageYUV, COLOR_RGB2YUV);
+		cv::cvtColor(image, imageYUV, cv::COLOR_RGB2YUV);
 		std::vector<cv::Mat> imageSplit;
 		cv::Mat imageY;
 		cv::split(imageYUV, imageSplit);
 		imageSplit[0].copyTo(imageY);
 
-		std::unique_ptr<std::vector<cv::Mat> > inputPlanes = std::unique_ptr<
-				std::vector<cv::Mat> >(new std::vector<cv::Mat>());
-		std::unique_ptr<std::vector<cv::Mat> > outputPlanes = std::unique_ptr<
-				std::vector<cv::Mat> >(new std::vector<cv::Mat>());
+		w2xc::convertWithModels(imageY, imageSplit[0], models);
 
-		inputPlanes->clear();
-		inputPlanes->push_back(imageY);
-
-		std::cout << "start noise reduction (level "
-				<< std::to_string(cmdNRLevel.getValue()) << ")" << std::endl;
-
-		for (int index = 0; index < models.size(); index++) {
-			std::cout << "Iteration #" << (index + 1) << "..." << std::endl;
-			if (!models[index]->filter(*inputPlanes, *outputPlanes)) {
-				std::exit(-1);
-			}
-			if (index != models.size() - 1) {
-				inputPlanes = std::move(outputPlanes);
-				outputPlanes = std::unique_ptr<std::vector<cv::Mat> >(
-						new std::vector<cv::Mat>());
-			}
-		}
-
-		outputPlanes->at(0).copyTo(imageSplit[0]);
 		cv::merge(imageSplit, imageYUV);
-		cv::cvtColor(imageYUV, image, COLOR_YUV2RGB);
+		cv::cvtColor(imageYUV, image, cv::COLOR_YUV2RGB);
 
 	} // noise reduction phase : end
 
@@ -147,11 +122,6 @@ int main(int argc, char** argv) {
 		if (!w2xc::modelUtility::generateModelFromJSON(modelFileName, models))
 			std::exit(-1);
 
-		// set njob
-		for (auto&& model : models) {
-			model->setNumberOfJobs(cmdNumberOfJobs.getValue());
-		}
-
 		std::cout << "start scaling" << std::endl;
 
 		// 2x scaling
@@ -166,8 +136,8 @@ int main(int argc, char** argv) {
 			imageSize.width *= 2;
 			imageSize.height *= 2;
 			cv::Mat image2xNearest;
-			cv::resize(image, image2xNearest, imageSize, 0, 0, INTER_NEAREST);
-			cv::cvtColor(image2xNearest, imageYUV, COLOR_RGB2YUV);
+			cv::resize(image, image2xNearest, imageSize, 0, 0, cv::INTER_NEAREST);
+			cv::cvtColor(image2xNearest, imageYUV, cv::COLOR_RGB2YUV);
 			std::vector<cv::Mat> imageSplit;
 			cv::Mat imageY;
 			cv::split(imageYUV, imageSplit);
@@ -177,35 +147,18 @@ int main(int argc, char** argv) {
 			// convert RGB -> YUV and split
 			imageSplit.clear();
 			cv::Mat image2xBicubic;
-			cv::resize(image,image2xBicubic,imageSize,0,0,INTER_CUBIC);
-			cv::cvtColor(image2xBicubic, imageYUV, COLOR_RGB2YUV);
+			cv::resize(image,image2xBicubic,imageSize,0,0,cv::INTER_CUBIC);
+			cv::cvtColor(image2xBicubic, imageYUV, cv::COLOR_RGB2YUV);
 			cv::split(imageYUV, imageSplit);
 
-			std::unique_ptr<std::vector<cv::Mat> > inputPlanes =
-					std::unique_ptr<std::vector<cv::Mat> >(
-							new std::vector<cv::Mat>());
-			std::unique_ptr<std::vector<cv::Mat> > outputPlanes =
-					std::unique_ptr<std::vector<cv::Mat> >(
-							new std::vector<cv::Mat>());
+			if(!w2xc::convertWithModels(imageY, imageSplit[0], models)){
+				std::cerr << "w2xc::convertWithModels : something error has occured.\n"
+						"stop." << std::endl;
+				std::exit(1);
+			};
 
-			inputPlanes->clear();
-			inputPlanes->push_back(imageY);
-
-			for (int index = 0; index < models.size(); index++) {
-				std::cout << "Iteration #" << (index + 1) << "..." << std::endl;
-				if (!models[index]->filter(*inputPlanes, *outputPlanes)) {
-					std::exit(-1);
-				}
-				if (index != models.size() - 1) {
-					inputPlanes = std::move(outputPlanes);
-					outputPlanes = std::unique_ptr<std::vector<cv::Mat> >(
-							new std::vector<cv::Mat>());
-				}
-			}
-
-			outputPlanes->at(0).copyTo(imageSplit[0]);
 			cv::merge(imageSplit, imageYUV);
-			cv::cvtColor(imageYUV, image, COLOR_YUV2RGB);
+			cv::cvtColor(imageYUV, image, cv::COLOR_YUV2RGB);
 
 		} // 2x scaling : end
 
@@ -217,7 +170,7 @@ int main(int argc, char** argv) {
 			lastImageSize.height =
 					static_cast<int>(static_cast<double>(lastImageSize.height
 							* shrinkRatio));
-			cv::resize(image, image, lastImageSize, 0, 0, INTER_LINEAR);
+			cv::resize(image, image, lastImageSize, 0, 0, cv::INTER_LINEAR);
 		}
 
 	}

@@ -39,6 +39,8 @@ bool Model::filter(std::vector<cv::Mat> &inputPlanes,
 		outputPlanes.push_back(cv::Mat::zeros(inputPlanes[0].size(), CV_32FC1));
 	}
 
+	int nJob = modelUtility::getInstance().getNumberOfJobs();
+
 	// filter job issuing
 	std::vector<std::thread> workerThreads;
 	int worksPerThread = nOutputPlanes / nJob;
@@ -116,6 +118,7 @@ bool Model::filterWorker(std::vector<cv::Mat> &inputPlanes,
 		std::vector<cv::Mat> &weightMatrices,
 		std::vector<cv::Mat> &outputPlanes, unsigned int beginningIndex,
 		unsigned int nWorks) {
+	cv::ocl::setUseOpenCL(false); // disable OpenCL Support(temporary)
 
 	cv::Size ipSize = inputPlanes[0].size();
 	// filter processing
@@ -123,7 +126,6 @@ bool Model::filterWorker(std::vector<cv::Mat> &inputPlanes,
 	// kernel : weightMatrices
 	for (int opIndex = beginningIndex; opIndex < (beginningIndex + nWorks);
 			opIndex++) {
-		cv::ocl::setUseOpenCL(false); // disable OpenCL Support(temporary)
 
 		int wMatIndex = nInputPlanes * opIndex;
 		cv::Mat outputPlane = cv::Mat::zeros(ipSize, CV_32FC1);
@@ -156,8 +158,13 @@ bool Model::filterWorker(std::vector<cv::Mat> &inputPlanes,
 	return true;
 }
 
-void Model::setNumberOfJobs(int setNJob) {
-	nJob = setNJob;
+modelUtility * modelUtility::instance = nullptr;
+
+modelUtility& modelUtility::getInstance(){
+	if(instance == nullptr){
+		instance = new modelUtility();
+	}
+	return *instance;
 }
 
 bool modelUtility::generateModelFromJSON(const std::string &fileName,
@@ -188,6 +195,34 @@ bool modelUtility::generateModelFromJSON(const std::string &fileName,
 
 	return true;
 }
+
+bool modelUtility::setNumberOfJobs(int setNJob){
+	if(setNJob < 1)return false;
+	nJob = setNJob;
+	return true;
+};
+
+int modelUtility::getNumberOfJobs(){
+	return nJob;
+}
+
+bool modelUtility::setBlockSize(cv::Size size){
+	if(size.width < 0 || size.height < 0)return false;
+	blockSplittingSize = size;
+	return true;
+}
+
+bool modelUtility::setBlockSizeExp2Square(int exp){
+	if(exp < 0)return false;
+	int length = std::pow(2, exp);
+	blockSplittingSize = cv::Size(length, length);
+	return true;
+}
+
+cv::Size modelUtility::getBlockSize(){
+	return blockSplittingSize;
+}
+
 
 // for debugging
 
