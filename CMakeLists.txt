@@ -14,6 +14,6 @@ endif()
 set(CMAKE_PREFIX_PATH "opencv-install")
 find_package(OpenCV REQUIRED)
 include_directories(include ${OpenCV_INCLUDE_DIRS})
-add_executable(waifu2x-converter-cpp src/modelHandler.cpp src/main.cpp)
+add_executable(waifu2x-converter-cpp src/modelHandler.cpp src/main.cpp src/convertRoutine.cpp)
 target_link_libraries(waifu2x-converter-cpp ${OpenCV_LIBS})
 
